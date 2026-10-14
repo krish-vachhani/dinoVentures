@@ -1,0 +1,59 @@
+{
+  "name": "coin-vault-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "prisma generate && tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "prisma:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:seed": "prisma db seed",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "postinstall": "prisma generate",
+    "mock:pay": "tsx src/scripts/sendMockPaymentEvent.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^5.3.0",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.1",
+    "pino": "^9.14.0",
+    "pino-http": "^10.5.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^7.2.1",
+    "eslint": "^9.39.5",
+    "globals": "^17.13.0",
+    "pino-pretty": "^13.2.0",
+    "prisma": "^7.10.0",
+    "supertest": "^7.3.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.2",
+    "vitest": "^5.0.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" role="img" aria-label="Mic Drop">
+  <defs>
+    <radialGradient id="g" cx="50%" cy="40%" r="75%">
+      <stop offset="0%" stop-color="#f472b6" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#3a0d27"/>
+    </radialGradient>
+    <pattern id="p" width="16" height="16" patternUnits="userSpaceOnUse">
+      <path d="M16 0H0V16" fill="none" stroke="#f472b6" stroke-opacity="0.08"/>
+    </pattern>
+  </defs>
+  <rect width="320" height="200" fill="url(#g)"/>
+  <rect width="320" height="200" fill="url(#p)"/>
+  <circle cx="160" cy="92" r="54" fill="none" stroke="#f472b6" stroke-opacity="0.5" stroke-width="2"/>
+  <text x="160" y="114" font-size="60" text-anchor="middle" font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif">🎤</text>
+  <text x="160" y="182" font-size="16" font-weight="700" letter-spacing="3" text-anchor="middle" fill="#f472b6" font-family="Inter, Arial, sans-serif">MIC DROP</text>
+</svg>

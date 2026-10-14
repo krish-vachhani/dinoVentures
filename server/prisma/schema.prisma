@@ -1,0 +1,233 @@
+// Coin Vault data model.
+//
+// Invariants Prisma cannot express (CHECK constraints, the append-only ledger
+// trigger, the reconciliation view) live in the hand-edited migration SQL under
+// prisma/migrations. The database is the last line of defence for money.
+
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "esm"
+  importFileExtension    = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum ProductCategory {
+  SKIN
+  EMOTE
+  BATTLE_PASS
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum LedgerEntryType {
+  TOPUP_CREDIT
+  PURCHASE_DEBIT
+}
+
+enum OrderStatus {
+  COMPLETED
+}
+
+model User {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  displayName  String     @map("display_name")
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  wallet       Wallet?
+  topups       Topup[]
+  orders       Order[]
+  entitlements Entitlement[]
+
+  @@map("users")
+}
+
+model Wallet {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @unique @map("user_id") @db.Uuid
+  // Cached balance in whole coins. The ledger is the source of truth; the
+  // wallet_reconciliation view proves they agree.
+  balance   Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user         User                @relation(fields: [userId], references: [id])
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+// Immutable, append-only ledger. One row per balance change.
+model WalletTransaction {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  walletId     String          @map("wallet_id") @db.Uuid
+  type         LedgerEntryType
+  // Signed: positive for credits, negative for debits. SUM(amount) == balance.
+  amount       Int
+  balanceAfter Int             @map("balance_after")
+  // At most one ledger entry per top-up / order: the DB-level backstop
+  // against double credits and double debits.
+  topupId      String?         @unique @map("topup_id") @db.Uuid
+  orderId      String?         @unique @map("order_id") @db.Uuid
+  description  String
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  wallet Wallet @relation(fields: [walletId], references: [id])
+  topup  Topup? @relation(fields: [topupId], references: [id])
+  order  Order? @relation(fields: [orderId], references: [id])
+
+  @@index([walletId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("wallet_transactions")
+}
+
+model CoinPackage {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code       String   @unique
+  name       String
+  baseCoins  Int      @map("base_coins")
+  bonusCoins Int      @default(0) @map("bonus_coins")
+  // Real-money price in minor units (paise for INR). Never floats.
+  priceMinor Int      @map("price_minor")
+  currency   String   @db.Char(3)
+  active     Boolean  @default(true)
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  topups Topup[]
+
+  @@map("coin_packages")
+}
+
+// A request to buy coins. Coin grant and price are snapshotted at initiation,
+// so later package edits never rewrite history. Payment attempts are kept out
+// of the coin ledger: a failed payment is not a wallet transaction.
+model Topup {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String        @map("user_id") @db.Uuid
+  packageId      String        @map("package_id") @db.Uuid
+  idempotencyKey String        @map("idempotency_key")
+  packageName    String        @map("package_name")
+  coinsBase      Int           @map("coins_base")
+  coinsBonus     Int           @map("coins_bonus")
+  coinsTotal     Int           @map("coins_total")
+  priceMinor     Int           @map("price_minor")
+  currency       String        @db.Char(3)
+  paymentStatus  PaymentStatus @default(PENDING) @map("payment_status")
+  // Reference issued by the (mock) payment provider.
+  paymentRef     String        @unique @map("payment_ref")
+  failureReason  String?       @map("failure_reason")
+  // Set in the same transaction as the ledger credit.
+  creditedAt     DateTime?     @map("credited_at") @db.Timestamptz(6)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user          User               @relation(fields: [userId], references: [id])
+  package       CoinPackage        @relation(fields: [packageId], references: [id])
+  ledgerEntry   WalletTransaction?
+  paymentEvents PaymentEvent[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("topups")
+}
+
+// Every payment-provider event we accepted, deduplicated by the provider's
+// event id. Gives an audit trail and makes webhook redelivery a no-op.
+model PaymentEvent {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  providerEventId String   @unique @map("provider_event_id")
+  topupId         String   @map("topup_id") @db.Uuid
+  type            String
+  payload         Json
+  receivedAt      DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  topup Topup @relation(fields: [topupId], references: [id])
+
+  @@map("payment_events")
+}
+
+model Product {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sku            String          @unique
+  name           String
+  description    String
+  category       ProductCategory
+  imageUrl       String          @map("image_url")
+  priceCoins     Int             @map("price_coins")
+  active         Boolean         @default(true)
+  // Battle passes are seasonal entitlements.
+  seasonCode     String?         @map("season_code")
+  seasonStartsAt DateTime?       @map("season_starts_at") @db.Timestamptz(6)
+  seasonEndsAt   DateTime?       @map("season_ends_at") @db.Timestamptz(6)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  orders       Order[]
+  entitlements Entitlement[]
+
+  @@index([category, active])
+  @@map("products")
+}
+
+// A completed purchase. Failed purchases roll back entirely, so no row exists
+// for them. Price is snapshotted so catalog edits never rewrite history.
+model Order {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String      @map("user_id") @db.Uuid
+  productId      String      @map("product_id") @db.Uuid
+  idempotencyKey String      @map("idempotency_key")
+  productName    String      @map("product_name")
+  quantity       Int         @default(1)
+  unitPriceCoins Int         @map("unit_price_coins")
+  totalCoins     Int         @map("total_coins")
+  status         OrderStatus @default(COMPLETED)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user        User               @relation(fields: [userId], references: [id])
+  product     Product            @relation(fields: [productId], references: [id])
+  ledgerEntry WalletTransaction?
+  entitlement Entitlement?
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("orders")
+}
+
+// Ownership. Distinct from orders: inventory is what a user owns now, traced
+// back to the order that granted it.
+model Entitlement {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  productId  String    @map("product_id") @db.Uuid
+  orderId    String    @unique @map("order_id") @db.Uuid
+  seasonCode String?   @map("season_code")
+  validFrom  DateTime  @default(now()) @map("valid_from") @db.Timestamptz(6)
+  // NULL = permanent.
+  validUntil DateTime? @map("valid_until") @db.Timestamptz(6)
+  grantedAt  DateTime  @default(now()) @map("granted_at") @db.Timestamptz(6)
+
+  user    User    @relation(fields: [userId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+  order   Order   @relation(fields: [orderId], references: [id])
+
+  // Every MVP product is non-repeatable: a user owns each at most once.
+  @@unique([userId, productId])
+  @@map("entitlements")
+}

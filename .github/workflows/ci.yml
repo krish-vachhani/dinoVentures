@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Server · lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: coinvault
+          POSTGRES_PASSWORD: coinvault
+          POSTGRES_DB: coinvault_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U coinvault -d coinvault_test"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://coinvault:coinvault@localhost:5432/coinvault_test
+      TEST_DATABASE_URL: postgresql://coinvault:coinvault@localhost:5432/coinvault_test
+      JWT_SECRET: ci-only-jwt-secret-at-least-32-characters
+      MOCK_PAYMENT_WEBHOOK_SECRET: ci-only-webhook-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci # postinstall generates the Prisma client
+      - run: npx prisma validate
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  client:
+    name: Client · lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

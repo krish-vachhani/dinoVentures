@@ -1,0 +1,59 @@
+# Development:   docker compose up -d                 -> Postgres only (run server/client with npm)
+# Full stack:    docker compose --profile app up -d --build
+#                -> Postgres + migrations/seed + API + web on http://localhost:8080
+#                   (images are built locally; nothing is published)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: coinvault-postgres
+    environment:
+      POSTGRES_USER: coinvault
+      POSTGRES_PASSWORD: coinvault
+      POSTGRES_DB: coinvault
+    ports:
+      # 5433 on the host avoids clashing with a locally installed Postgres.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coinvault -d coinvault"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    profiles: ["app"]
+    build: { context: ./server, target: build }
+    environment:
+      DATABASE_URL: postgresql://coinvault:coinvault@postgres:5432/coinvault
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  server:
+    profiles: ["app"]
+    build: { context: ./server, target: runtime }
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://coinvault:coinvault@postgres:5432/coinvault
+      JWT_SECRET: ${JWT_SECRET:-local-compose-secret-change-me-0123456789}
+      MOCK_PAYMENT_WEBHOOK_SECRET: ${MOCK_PAYMENT_WEBHOOK_SECRET:-local-compose-webhook-secret}
+      MOCK_PAYMENT_SIMULATION: ${MOCK_PAYMENT_SIMULATION:-true}
+      CLIENT_ORIGIN: http://localhost:8080
+      TRUST_PROXY: "true" # requests arrive through the nginx container
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  client:
+    profiles: ["app"]
+    build: { context: ./client }
+    ports:
+      - "8080:80"
+    depends_on:
+      server: { condition: service_healthy }
+
+volumes:
+  pgdata:

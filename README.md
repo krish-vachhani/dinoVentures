@@ -383,7 +383,6 @@ In development, Vite proxies `/api` to the API (`VITE_API_PROXY_TARGET`, default
 
 ## Assumptions and trade-offs
 
-- **The PRD text was truncated** partway through §5.2 (Wallet). The rest of the data model (ledger, top-ups, payment events, orders, entitlements) was derived from FR-1 to FR-8.
 - **All MVP products are non-repeatable.** `UNIQUE(user_id, product_id)` enforces that. Repeatable consumables would need a `repeatable` flag on products and a different ownership model, such as quantities.
 - **Quantity is always 1** (no cart, per the PRD's scope). The `quantity` column exists so the model can grow.
 - **Only completed orders are stored.** A failed purchase rolls back entirely, which leaves no partial state, so `OrderStatus` currently has only `COMPLETED`. Refunds would add new statuses and compensating ledger entries, never edits.
